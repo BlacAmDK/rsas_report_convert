@@ -144,7 +144,6 @@ fn get_index_html(zip_file_path: PathBuf) -> Result<()> {
         .collect();
     write_to_excel(vuln_list, ports_list, &xlsx_file_path.to_string_lossy())
         .context("无法写入xlsx文件")?;
-    println!("OK");
     Ok(())
 }
 
