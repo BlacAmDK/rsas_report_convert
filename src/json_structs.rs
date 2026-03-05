@@ -13,12 +13,8 @@ pub struct ScanResult {
 #[serde(rename_all = "camelCase")]
 pub struct Category {
     pub title: String,
-    pub children: Option<Vec<Child>>,
+    pub children: Option<Vec<Category>>,
     pub data: Option<DataUnit>,
-}
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Child {
-    pub data: DataUnit,
 }
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DataUnit {

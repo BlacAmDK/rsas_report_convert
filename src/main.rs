@@ -33,7 +33,7 @@ fn get_index_html(zip_file_path: PathBuf) -> Result<()> {
     xlsx_file_path.set_extension("xlsx");
     let zip_file = File::open(zip_file_path).context("无法读取输入文件")?;
     let mut archive = ZipArchive::new(zip_file).context("无法读取压缩文件")?;
-    let mut vul_port_map: HashMap<String, HashMap<u32, VulPort>> = HashMap::new();
+    let mut vul_port_map: HashMap<String, HashMap<u32, Vec<VulPort>>> = HashMap::new();
     let mut ports_list: Vec<HashMap<String, String>> = Vec::new();
     let mut vuln_list = vec![];
     for i in 0..archive.len() {
@@ -47,12 +47,12 @@ fn get_index_html(zip_file_path: PathBuf) -> Result<()> {
         };
         // hosts match **/host/*.html
         if file.is_file()
-            && path.extension().map_or(false, |ext| ext == "html")
+            && path.extension().is_some_and(|ext| ext == "html")
             && path
                 .parent()
                 .unwrap_or(&path)
                 .file_name()
-                .map_or(false, |name| name == "host")
+                .is_some_and(|name| name == "host")
         {
             let host_data = parse_html_file(file)?;
             if let Some(Category {
@@ -67,8 +67,13 @@ fn get_index_html(zip_file_path: PathBuf) -> Result<()> {
                     ..
                 }) = host_data.get_category_by_name("漏洞信息")
                 {
-                    let mut port_map = HashMap::new();
-                    let vul_items = vul_items.iter().filter_map(|c| c.data.vul_items.as_ref());
+                    let vul_items = if let Some(Category { data: None, children: Some(vul_items), .. }) = vul_items.first(){
+                            vul_items
+                        }else{
+                        vul_items
+                    };
+                    let mut port_map: HashMap<u32, Vec<VulPort>> = HashMap::new();
+                    let vul_items = vul_items.iter().filter_map(|c| c.data.as_ref().unwrap().vul_items.as_ref());
                     for vul_item in vul_items {
                         for vuls in vul_item.iter() {
                             for id in vuls.vuls.iter() {
@@ -79,7 +84,11 @@ fn get_index_html(zip_file_path: PathBuf) -> Result<()> {
                                     protocol: vuls.protocol.clone(),
                                     service: vuls.service.clone(),
                                 };
-                                port_map.insert(id.vul_id, entry);
+                                if let Some(entries) = port_map.get_mut(&id.vul_id){
+                                    entries.push(entry);
+                                }else{
+                                    port_map.insert(id.vul_id, vec![entry]);
+                                }
                             }
                         }
                     }
@@ -111,7 +120,7 @@ fn get_index_html(zip_file_path: PathBuf) -> Result<()> {
                 .children
                 .as_ref()
                 .and_then(|children| children.first())
-                .and_then(|child| child.data.vulns_info.as_ref())
+                .and_then(|child| child.data.as_ref().unwrap().vulns_info.as_ref())
                 .context("无法在汇总表找到漏洞信息字段")?
                 .vuln_distribution
                 .vuln_list
@@ -121,29 +130,30 @@ fn get_index_html(zip_file_path: PathBuf) -> Result<()> {
     let vuln_list: Vec<_> = vuln_list
         .iter()
         .flat_map(|v| {
-            v.target.iter().map(|ip| {
+            v.target.iter().flat_map(|ip| {
                 let port_info = vul_port_map
                     .get(ip)
                     .and_then(|info| info.get(&v.vul_id))
                     .context("无法在主机详情数据中找到漏洞对应端口")
                     .unwrap();
-                ExcelRecord {
+                port_info.iter().map(|info| ExcelRecord {
                     ip,
                     system_name: &report_system_name,
-                    port: port_info.port,
-                    protocol: &port_info.protocol,
-                    service: &port_info.service,
+                    port: info.port,
+                    protocol: &info.protocol,
+                    service: &info.service,
                     i18n_name: &v.i18n_name,
                     vuln_level: &v.vuln_level,
                     i18n_solution: &v.i18n_solution,
                     i18n_description: &v.i18n_description,
                     cve_id: &v.cve_id,
-                }
+                })
             })
         })
         .collect();
     write_to_excel(vuln_list, ports_list, &xlsx_file_path.to_string_lossy())
         .context("无法写入xlsx文件")?;
+    println!("OK");
     Ok(())
 }
 
